@@ -44,6 +44,20 @@ class VitrinePage extends StatefulWidget {
 }
 
 class _VitrinePageState extends State<VitrinePage> {
+  // Helper para garantir que sempre teremos uma lista de imagens,
+  // mesmo que o produto antigo só tenha 'imagem_url'
+  List<String> _obterImagens(Map<String, dynamic> item) {
+    // Se tiver o array de imagens novo, usa ele
+    if (item['imagens'] != null && (item['imagens'] as List).isNotEmpty) {
+      return List<String>.from(item['imagens']);
+    }
+    // Fallback: Se não tiver array, usa a imagem única antiga
+    if (item['imagem_url'] != null && item['imagem_url'].toString().isNotEmpty) {
+      return [item['imagem_url']];
+    }
+    // Se não tiver nada, retorna lista vazia
+    return [];
+  }
   // Dados
   List<Map<String, dynamic>> _produtos = [];
   List<String> _categorias = [];
@@ -83,6 +97,37 @@ class _VitrinePageState extends State<VitrinePage> {
       debugPrint('Erro: $e');
       setState(() => _loading = false);
     }
+  }
+
+  void _abrirLightbox(BuildContext context, String imageUrl) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.zero, // Ocupa a tela toda
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // InteractiveViewer permite pinça (zoom) e pan (arrastar)
+            InteractiveViewer(
+              panEnabled: true,
+              minScale: 0.5,
+              maxScale: 4.0,
+              child: Image.network(imageUrl, fit: BoxFit.contain),
+            ),
+            // Botão de fechar
+            Positioned(
+              top: 40,
+              right: 20,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                onPressed: () => Navigator.of(ctx).pop(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _adicionarAoCarrinho(Map<String, dynamic> produto) {
@@ -294,91 +339,168 @@ class _VitrinePageState extends State<VitrinePage> {
     final variantes = _parseVariantes(item['variantes']);
     final estoque = item['estoque'] ?? 0;
     final temEstoque = estoque > 0;
+    final listaImagens = _obterImagens(item); // Usa nosso helper
+    final descricao = item['descricao'] as String?;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 10, left: 10, right: 10),
+      margin: const EdgeInsets.only(bottom: 15, left: 10, right: 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius: BorderRadius.circular(12), // Design um pouco mais moderno
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+        ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    width: 80,
-                    height: 80,
-                    color: Colors.grey[100],
-                    child: item['imagem_url'] != null
-                        ? Image.network(item['imagem_url'], fit: BoxFit.cover)
-                        : const Icon(Icons.image_not_supported, color: Colors.grey),
-                  ),
-                ),
-                const SizedBox(width: 15),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(item['nome'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      const SizedBox(height: 4),
-                      Text(real.format(item['preco']), style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w800, fontSize: 18)),
-                      const SizedBox(height: 4),
-                      Text(
-                        temEstoque ? "Estoque: $estoque un" : "Indisponível",
-                        style: TextStyle(color: temEstoque ? Colors.grey[600] : Colors.red, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            
-            if (variantes.isNotEmpty && temEstoque) ...[
-              const SizedBox(height: 10),
-              const Text("Escolha uma opção:", style: TextStyle(fontSize: 12, color: Colors.grey)),
-              const SizedBox(height: 5),
-              Wrap(
-                spacing: 8,
-                children: variantes.map((v) {
-                  final isSelected = _variacaoSelecionada[item['id']] == v;
-                  return ChoiceChip(
-                    label: Text(v),
-                    selected: isSelected,
-                    onSelected: (selected) {
-                      setState(() {
-                        _variacaoSelecionada[item['id']] = selected ? v : '';
-                      });
-                    },
-                    selectedColor: Colors.deepPurple.shade100,
-                    labelStyle: TextStyle(color: isSelected ? Colors.deepPurple : Colors.black),
-                  );
-                }).toList(),
-              ),
-            ],
-
-            const SizedBox(height: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // --- ÁREA DO CARROSSEL DE IMAGENS ---
+          if (listaImagens.isNotEmpty)
             SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: temEstoque ? () => _adicionarAoCarrinho(item) : null,
-                icon: const Icon(Icons.add_shopping_cart, size: 18),
-                label: const Text("Adicionar ao Carrinho"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: temEstoque ? Colors.deepPurple : Colors.grey,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                ),
+              height: 250, // Altura fixa para o carrossel
+              child: Stack(
+                children: [
+                  PageView.builder(
+                    itemCount: listaImagens.length,
+                    itemBuilder: (context, imgIndex) {
+                      return GestureDetector(
+                        // Ao clicar, abre o Lightbox
+                        onTap: () => _abrirLightbox(context, listaImagens[imgIndex]),
+                        child: ClipRRect(
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                          child: Image.network(
+                            listaImagens[imgIndex],
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            loadingBuilder: (ctx, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return Center(child: CircularProgressIndicator(value: loadingProgress.expectedTotalBytes != null ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes! : null));
+                            },
+                            errorBuilder: (context, error, stackTrace) =>
+                            const Center(child: Icon(Icons.broken_image, size: 50, color: Colors.grey)),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  // Indicador de "1/3" fotos se tiver mais de uma
+                  if (listaImagens.length > 1)
+                    Positioned(
+                      bottom: 10,
+                      right: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                        child: Text(
+                          "${listaImagens.length} fotos",
+                          style: const TextStyle(color: Colors.white, fontSize: 10),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             )
-          ],
-        ),
+            else
+              const SizedBox(
+                height: 200,
+                child: Center(child: Icon(Icons.image_not_supported, size: 50, color: Colors.grey))
+              ),
+
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Título e Preço
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item['nome'],
+                            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 18),
+                          ),
+                        ),
+                        Text(
+                          real.format(item['preco']),
+                          style: GoogleFonts.poppins(color: Colors.green[700], fontWeight: FontWeight.bold, fontSize: 18),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    // Status de Estoque
+                    Text(
+                      temEstoque ? "Em estoque: $estoque un" : "Indisponível",
+                      style: TextStyle(color: temEstoque ? Colors.grey[600] : Colors.red, fontSize: 12),
+                    ),
+
+                    // --- DESCRIÇÃO EXPANSÍVEL (Gestão de Conteúdo) ---
+                    if (descricao != null && descricao.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      ExpansionTile(
+                        title: const Text("Ver detalhes", style: TextStyle(fontSize: 14, color: Colors.deepPurple)),
+                        tilePadding: EdgeInsets.zero,
+                        childrenPadding: const EdgeInsets.only(bottom: 10),
+                        children: [
+                          Text(
+                            descricao,
+                            style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.5),
+                            textAlign: TextAlign.justify,
+                          ),
+                        ],
+                      ),
+                    ],
+
+                    // --- VARIANTES ---
+                    if (variantes.isNotEmpty && temEstoque) ...[
+                      const SizedBox(height: 15),
+                      const Text("Escolha:", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8, // Importante para não quebrar layout se tiver muitas opções
+                        children: variantes.map((v) {
+                          final isSelected = _variacaoSelecionada[item['id']] == v;
+                          return ChoiceChip(
+                            label: Text(v),
+                            selected: isSelected,
+                            onSelected: (selected) {
+                              setState(() {
+                                _variacaoSelecionada[item['id']] = selected ? v : '';
+                              });
+                            },
+                            selectedColor: Colors.deepPurple,
+                            labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.black),
+                            backgroundColor: Colors.grey[100],
+                          );
+                        }).toList(),
+                      ),
+                    ],
+
+                    const SizedBox(height: 20),
+
+                    // Botão de Adicionar
+                    SizedBox(
+                      width: double.infinity,
+                      height: 45,
+                      child: ElevatedButton.icon(
+                        onPressed: temEstoque ? () => _adicionarAoCarrinho(item) : null,
+                        icon: const Icon(Icons.add_shopping_cart, color: Colors.white),
+                        label: const Text("ADICIONAR À SACOLA", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: temEstoque ? Colors.deepPurple : Colors.grey,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          elevation: 0,
+                        ),
+                      ),
+                    )
+                  ],
+                ),
+              ),
+        ],
       ),
     );
   }
