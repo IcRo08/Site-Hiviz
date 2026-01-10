@@ -138,7 +138,7 @@ class _VitrinePageState extends State<VitrinePage> {
     if (_carrinho.isEmpty) return;
     final real = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
     StringBuffer msg = StringBuffer();
-    msg.writeln("Olá *Hiviz Acessórios*! 💖");
+    msg.writeln("Olá *Hiviz Acessórios*!");
     msg.writeln("Quero finalizar meu pedido:");
     msg.writeln("");
 
@@ -172,7 +172,7 @@ class _VitrinePageState extends State<VitrinePage> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text("Sua Sacola 🛍️", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                  const Text("Sua Sacola", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                   IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))
                 ],
               ),
@@ -391,12 +391,31 @@ class _VitrinePageState extends State<VitrinePage> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    CachedNetworkImage(
-                      imageUrl: urlOtimizada,
+                    Image.network(
+                      urlOtimizada,
                       fit: BoxFit.cover,
-                      memCacheWidth: 300, // Economiza memória RAM
-                      placeholder: (c, u) => Container(color: Colors.grey[100]),
-                      errorWidget: (c,u,e) => const Icon(Icons.broken_image, color: Colors.grey),
+                      gaplessPlayback: true,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return Container(
+                          color: Colors.grey[100],
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded /
+                              loadingProgress.expectedTotalBytes!
+                              : null,
+                              color: Colors.pink,
+                            ),
+                          ),
+                        );
+                      },
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          color: Colors.grey[100],
+                          child: const Icon(Icons.image_not_supported, color: Colors.grey),
+                        );
+                      },
                     ),
                     if (estoque <= 0)
                       Container(color: Colors.white.withOpacity(0.7), child: const Center(child: Text("ESGOTADO", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red))))
@@ -606,8 +625,10 @@ class _ProdutoDetalhePageState extends State<ProdutoDetalhePage> {
 
 // --- 🔥 OTIMIZAÇÃO DE IMAGENS DO SUPABASE ---
 // Reduz drasticamente o peso das imagens
+// --- ⚡ OTIMIZAÇÃO LEVE (Velocidade vs Tamanho) ---
+// --- 🚀 MODO "RAW" (Sem processamento) ---
 String _getSupabaseImage(String url, {required int width}) {
-  if (!url.contains('supabase.co')) return url;
-  // Transforma para WebP (mais leve) e redimensiona no servidor
-  return '$url?width=$width&format=webp&quality=75';
+  // Retorna a URL original sem pedir nada ao servidor
+  // O download pode ser maior, mas o tempo de resposta inicial (TTFB) é zero.
+  return url;
 }
