@@ -89,26 +89,39 @@ class _VitrinePageState extends State<VitrinePage> {
     final supabase = Supabase.instance.client;
 
     try {
-      // 1. Busca Produtos (Apenas os visíveis)
-      final respProd = await supabase.from('produtos').select().order('nome');
-      final listaProd = List<Map<String, dynamic>>.from(respProd)
-      .where((p) => p['oculto'] != true).toList();
-
-      // 2. Busca Categorias
+      // 1. Busca TODAS as Categorias
       final respCat = await supabase.from('categorias').select().order('nome');
-      final listaCat = (respCat as List)
-      .where((c) => c['oculto'] != true)
-      .map((e) => e['nome'] as String).toList();
+
+      // Cria uma lista APENAS com os nomes das categorias que NÃO estão ocultas
+      final categoriasVisiveis = (respCat as List)
+      .where((c) => c['oculto'] != true) // Filtra ocultos
+      .map((e) => e['nome'] as String)
+      .toList();
+
+      // 2. Busca TODOS os Produtos
+      final respProd = await supabase.from('produtos').select().order('nome');
+
+      final produtosFiltrados = List<Map<String, dynamic>>.from(respProd).where((p) {
+        // Regra 1: O produto não pode estar oculto
+        final produtoOculto = p['oculto'] == true;
+
+        // Regra 2: A categoria do produto tem que estar na lista de categorias visíveis
+        final categoriaDoProduto = p['categoria'];
+        final categoriaEstaVisivel = categoriasVisiveis.contains(categoriaDoProduto);
+
+        // Só passa se NÃO for oculto E a categoria estiver visível
+        return !produtoOculto && categoriaEstaVisivel;
+      }).toList();
 
       if (mounted) {
         setState(() {
-          _categorias = listaCat;
-          _produtos = listaProd;
+          _categorias = categoriasVisiveis; // Atualiza a lista de abas
+          _produtos = produtosFiltrados;    // Atualiza a lista de produtos
           _loading = false;
         });
       }
     } catch (e) {
-      debugPrint('Erro: $e');
+      debugPrint('Erro ao carregar: $e');
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -263,7 +276,7 @@ class _VitrinePageState extends State<VitrinePage> {
       ? const Center(child: CircularProgressIndicator(color: Colors.pink))
       : Column(
         children: [
-          // Busca
+          // 1. BARRA DE BUSCA (Mantida)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: TextField(
@@ -272,103 +285,109 @@ class _VitrinePageState extends State<VitrinePage> {
               decoration: InputDecoration(
                 hintText: "O que você procura?",
                 prefixIcon: const Icon(Icons.search, color: Colors.pink),
-                suffixIcon: _termoBusca.isNotEmpty ? IconButton(icon: const Icon(Icons.close), onPressed: () { _searchController.clear(); setState(()=>_termoBusca=''); }) : null,
+                suffixIcon: _termoBusca.isNotEmpty
+                ? IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _termoBusca = '');
+                  })
+                : null,
                 filled: true,
                 fillColor: Colors.white,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
-                contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(30),
+                  borderSide: BorderSide.none),
+                  contentPadding:
+                  const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
               ),
             ),
           ),
-          // Lista
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final prods = _produtos.where((p) {
-                  final t = _termoBusca.toLowerCase();
-                  return p['nome'].toString().toLowerCase().contains(t) ||
-                  (p['descricao']??'').toString().toLowerCase().contains(t);
+
+          // 2. FILTRO DE CATEGORIAS (HORIZONTAL) - A GRANDE MUDANÇA
+          // Isso evita carregar tudo de uma vez.
+          if (_termoBusca.isEmpty)
+            SizedBox(
+              height: 50,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                itemCount: _categorias.length + 1, // +1 para o botão "Todos"
+                itemBuilder: (ctx, i) {
+                  // Lógica para o botão "Todos" ser o primeiro
+                  final nomeCategoria = i == 0 ? null : _categorias[i - 1];
+                  final titulo = i == 0 ? "Todos" : _categorias[i - 1];
+                  final isSelected = _categoriaAberta == nomeCategoria;
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: ChoiceChip(
+                      label: Text(titulo),
+                      selected: isSelected,
+                      selectedColor: Colors.pink,
+                      labelStyle: TextStyle(
+                        color: isSelected ? Colors.white : Colors.black),
+                        onSelected: (bool selected) {
+                          setState(() {
+                            // Se clicar no que já tá selecionado ou no "Todos", reseta
+                            _categoriaAberta = (i == 0) ? null : nomeCategoria;
+                          });
+                        },
+                    ),
+                  );
+                },
+              ),
+            ),
+
+            // 3. GRADE DE PRODUTOS (Lazy Loading Real)
+            Expanded(
+              child: Builder(builder: (context) {
+                // Filtra a lista principal
+                final listaFiltrada = _produtos.where((p) {
+                  // Filtro de busca
+                  if (_termoBusca.isNotEmpty) {
+                    final t = _termoBusca.toLowerCase();
+                    return p['nome'].toString().toLowerCase().contains(t);
+                  }
+                  // Filtro de categoria
+                  if (_categoriaAberta != null) {
+                    return p['categoria'] == _categoriaAberta;
+                  }
+                  return true; // Mostra tudo se não tiver filtro
                 }).toList();
 
-                // Se estiver buscando, mostra lista direta
-                if (_termoBusca.isNotEmpty) {
-                  return GridView.builder(
-                    padding: const EdgeInsets.all(16),
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 200, childAspectRatio: 0.7, crossAxisSpacing: 16, mainAxisSpacing: 16
-                    ),
-                    itemCount: prods.length,
-                    itemBuilder: (ctx, i) => _buildCard(prods[i]),
-                  );
+                if (listaFiltrada.isEmpty) {
+                  return const Center(
+                    child: Text("Nenhum produto encontrado."));
                 }
 
-                // Categorias (Accordion)
-                return ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 80),
-                  itemCount: _categorias.length,
-                  itemBuilder: (ctx, i) {
-                    final cat = _categorias[i];
-                    final itensCat = prods.where((p) => p['categoria'] == cat).toList();
-                    if (itensCat.isEmpty) return const SizedBox();
-
-                    final isOpen = _categoriaAberta == cat;
-
-                    return Column(
-                      children: [
-                        InkWell(
-                          onTap: () => setState(() => _categoriaAberta = isOpen ? null : cat),
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            decoration: BoxDecoration(
-                              color: isOpen ? Colors.pink : Colors.white,
-                              borderRadius: BorderRadius.circular(10),
-                              boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0,2))]
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(cat.toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, color: isOpen ? Colors.white : Colors.black87)),
-                                Icon(isOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: isOpen ? Colors.white : Colors.grey)
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (isOpen)
-                          GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            padding: const EdgeInsets.all(16),
-                            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 200, childAspectRatio: 0.7, crossAxisSpacing: 10, mainAxisSpacing: 10
-                            ),
-                            itemCount: itensCat.length,
-                            itemBuilder: (ctx, x) => _buildCard(itensCat[x]),
-                          )
-                      ],
-                    );
-                  },
+                return GridView.builder(
+                  padding: const EdgeInsets.all(16),
+                  // Cache Extent baixo para economizar memória
+                  cacheExtent: 100,
+                  gridDelegate:
+                  const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 200,
+                    childAspectRatio: 0.7,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16),
+                    itemCount: listaFiltrada.length,
+                    itemBuilder: (ctx, i) => _buildCard(listaFiltrada[i]),
                 );
-              },
+              }),
             ),
-          ),
         ],
       ),
     );
   }
 
-  // Card Simplificado (Miniatura)
   Widget _buildCard(Map<String, dynamic> item) {
     final imgs = item['imagens'] as List? ?? [];
-    final imgUrl = imgs.isNotEmpty ? imgs.first : (item['imagem_url'] ?? '');
+    final imgUrl = imgs.isNotEmpty ? imgs.first.toString() : (item['imagem_url']?.toString() ?? '');
     final estoque = item['estoque'] ?? 0;
-
-    // Otimização: Pede imagem pequena para a lista (300px)
-    final urlOtimizada = _getSupabaseImage(imgUrl, width: 300);
 
     return GestureDetector(
       onTap: () {
-        // NAVEGAÇÃO PARA A TELA DE DETALHES
         Navigator.push(context, MaterialPageRoute(
           builder: (context) => ProdutoDetalhePage(
             produto: item,
@@ -391,32 +410,9 @@ class _VitrinePageState extends State<VitrinePage> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.network(
-                      urlOtimizada,
-                      fit: BoxFit.cover,
-                      gaplessPlayback: true,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Container(
-                          color: Colors.grey[100],
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              value: loadingProgress.expectedTotalBytes != null
-                              ? loadingProgress.cumulativeBytesLoaded /
-                              loadingProgress.expectedTotalBytes!
-                              : null,
-                              color: Colors.pink,
-                            ),
-                          ),
-                        );
-                      },
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          color: Colors.grey[100],
-                          child: const Icon(Icons.image_not_supported, color: Colors.grey),
-                        );
-                      },
-                    ),
+                    // AQUI ESTÁ A MUDANÇA: Usando o widget blindado
+                    ImagemSupabase(url: imgUrl),
+
                     if (estoque <= 0)
                       Container(color: Colors.white.withOpacity(0.7), child: const Center(child: Text("ESGOTADO", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red))))
                   ],
@@ -627,8 +623,119 @@ class _ProdutoDetalhePageState extends State<ProdutoDetalhePage> {
 // Reduz drasticamente o peso das imagens
 // --- ⚡ OTIMIZAÇÃO LEVE (Velocidade vs Tamanho) ---
 // --- 🚀 MODO "RAW" (Sem processamento) ---
+// --- ⚡ OTIMIZAÇÃO DE IMAGENS ---
 String _getSupabaseImage(String url, {required int width}) {
-  // Retorna a URL original sem pedir nada ao servidor
-  // O download pode ser maior, mas o tempo de resposta inicial (TTFB) é zero.
-  return url;
+  if (!url.contains('supabase.co')) return url;
+
+  // Tenta consertar URLs com espaços não codificados
+  String urlTratada = url;
+  if (url.contains(' ')) {
+    urlTratada = Uri.encodeFull(url);
+  }
+
+  // Monta a URL otimizada
+  return '$urlTratada?width=$width&format=webp&quality=60&resize=contain';
+}
+
+class ImagemSupabase extends StatefulWidget {
+  final String url;
+  final double? width;
+  final BoxFit fit;
+
+  const ImagemSupabase({
+    super.key,
+    required this.url,
+    this.width,
+    this.fit = BoxFit.cover,
+  });
+
+  @override
+  State<ImagemSupabase> createState() => _ImagemSupabaseState();
+}
+
+class _ImagemSupabaseState extends State<ImagemSupabase> {
+  // Chave para forçar o recarregamento do widget
+  int _retryKey = 0;
+
+  // Controle para saber se já gastamos a "vida extra" automática
+  bool _tentativaAutomaticaFeita = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.url.isEmpty) return const Icon(Icons.broken_image, color: Colors.grey);
+
+    // Tenta a URL otimizada
+    final urlOtimizada = _getSupabaseImage(widget.url, width: 300);
+
+    return CachedNetworkImage(
+      key: ValueKey(_retryKey), // Se mudar esse valor, o componente recria do zero
+      imageUrl: urlOtimizada,
+      fit: widget.fit,
+      memCacheWidth: 400,
+
+      // Loading normal
+      placeholder: (context, url) => Container(
+        color: Colors.grey[100],
+        child: const Center(
+          child: SizedBox(
+            width: 20, height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.pink)
+          )
+        ),
+      ),
+
+      errorWidget: (context, url, error) {
+        // --- AQUI ESTÁ A LÓGICA NOVA ---
+
+        // Se ainda não tentamos recuperar automaticamente...
+        if (!_tentativaAutomaticaFeita) {
+
+          // Agendamos o reload para logo após o desenho da tela terminar
+          // (Não podemos dar setState direto dentro do build, por isso o addPostFrameCallback)
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _tentativaAutomaticaFeita = true; // Marca que já gastou a tentativa
+                _retryKey++; // Força o reload
+              });
+            }
+          });
+
+          // Enquanto ele prepara o reload, mostra o loading ainda
+          return Container(
+            color: Colors.grey[100],
+            child: const Center(
+              child: SizedBox(
+                width: 20, height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.pink)
+              )
+            ),
+          );
+        }
+
+        // --- SE CHEGOU AQUI, É PORQUE A TENTATIVA AUTOMÁTICA FALHOU ---
+        // Agora mostramos o botão manual
+        return InkWell(
+          onTap: () {
+            setState(() {
+              // Reseta a flag para permitir nova tentativa automática no futuro se quiser
+              // ou apenas força o reload manual agora.
+              _retryKey++;
+            });
+          },
+          child: Container(
+            color: Colors.grey[200],
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Icon(Icons.refresh, color: Colors.pink),
+                SizedBox(height: 4),
+                Text("Recarregar", style: TextStyle(fontSize: 10, color: Colors.black54))
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
